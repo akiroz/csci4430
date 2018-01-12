@@ -1,5 +1,8 @@
 .DS_Store
 
 *.o
+*.dSYM
+.gdb_history
 myftpserver
 myftpclient
+data

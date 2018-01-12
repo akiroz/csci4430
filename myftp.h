@@ -1,3 +1,4 @@
+#include <stdbool.h>
 
 #define MYFTP_BIND 0
 #define MYFTP_CONNECT 1
@@ -21,6 +22,7 @@ void fatal_error( int argc, ... );
 
 int open_socket( char *hostname, char *port, int flags, int action );
 
+bool myftp_msg_ok(struct myftp_msg msg);
 struct myftp_msg new_myftp_msg( unsigned char type );
 struct myftp_msg recv_myftp_msg( int sock_fd );
 void send_myftp_msg( int sock_fd, struct myftp_msg msg );

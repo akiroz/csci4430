@@ -1,7 +1,7 @@
 #include <stdio.h>      // fprintf, sprintf
 #include <stdlib.h>     // NULL, exit
 #include <errno.h>      // errno
-#include <string.h>     // strerror
+#include <string.h>     // strerror, memcmp
 #include <stdarg.h>     // va_start, va_arg, va_end
 #include <sys/types.h>  // Legacy header for socket.h types
 #include <sys/socket.h> // AF_UNSPEC, SOCK_STREAM, socket, bind, connect
@@ -19,7 +19,7 @@ void fatal_error( int argc, ... )
   va_list args;
   va_start( args, argc );
   for(int i = 0; i < argc; i++) {
-    fprintf( stderr, "%s", va_arg( args, char* ) );
+    fprintf( stderr, "%s ", va_arg( args, char* ) );
   }
   va_end( args );
 
@@ -37,7 +37,7 @@ int open_socket( char *hostname, char *port, int flags, int action )
 
   struct addrinfo *host;
   struct addrinfo hints = {
-    .ai_family    = AF_UNSPEC,
+    .ai_family    = AF_INET,
     .ai_socktype  = SOCK_STREAM,
     .ai_protocol  = tcp_proto->p_proto,
     .ai_flags     = flags
@@ -66,6 +66,11 @@ int open_socket( char *hostname, char *port, int flags, int action )
   freeaddrinfo(host);
 
   return sock_fd;
+}
+
+bool myftp_msg_ok(struct myftp_msg msg)
+{
+  return memcmp( msg.protocol, "myftp", 5 ) == 0;
 }
 
 struct myftp_msg new_myftp_msg(unsigned char type)
