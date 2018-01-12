@@ -23,6 +23,14 @@ void fatal_error( int argc, ... );
 int open_socket( char *hostname, char *port, int flags, int action );
 
 bool myftp_msg_ok(struct myftp_msg msg);
+
 struct myftp_msg new_myftp_msg( unsigned char type );
-struct myftp_msg recv_myftp_msg( int sock_fd );
-void send_myftp_msg( int sock_fd, struct myftp_msg msg );
+
+int recv_myftp_msg( int sock_fd, struct myftp_msg *msg );
+
+int send_myftp_msg( int sock_fd, struct myftp_msg *msg );
+
+int recv_all( int sock_fd, char *buf, size_t length );
+
+int send_all( int sock_fd, char *buf, size_t length );
+

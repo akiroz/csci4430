@@ -1,34 +1,38 @@
-#include <stdlib.h>     // NULL, malloc, free
-#include <stdio.h>      // printf
-#include <string.h>     // strcmp, strerror
-#include <errno.h>      // errno
-#include <unistd.h>     // close
+#include <stdlib.h>
+#include <stdio.h>
+#include <stdbool.h>
+#include <string.h>
+#include <errno.h>
+#include <unistd.h>
+#include <fcntl.h>
 #include <sys/types.h>
-#include <sys/socket.h> // send, recv
-
-#include "myftp.h"      // MYFTP_CONNECT, fatal_error, open_socket, myftp_msg_ok,
-                        // new_myftp_msg, send_myftp_msg, recv_myftp_msg,
-                        // MYFTP_LIST_REQUEST, MYFTP_LIST_REPLY
+#include <sys/socket.h>
+#include "myftp.h"
 
 
 void myftp_client_list( int sock_fd )
 {
-  send_myftp_msg( sock_fd, new_myftp_msg( MYFTP_LIST_REQUEST ) );
+  struct myftp_msg req = new_myftp_msg( MYFTP_LIST_REQUEST );
+  if( send_myftp_msg( sock_fd, &req ) == -1 ) {
+    fatal_error( 2, "send", strerror(errno) );
+  }
 
-  struct myftp_msg resp = recv_myftp_msg( sock_fd );
-  if( !myftp_msg_ok(resp) ) fatal_error( 1, "Malformed response" );
+  struct myftp_msg resp;
+  if( recv_myftp_msg( sock_fd, &resp ) == -1 ) {
+    fatal_error( 2, "recv", strerror(errno) );
+  }
+  if( !myftp_msg_ok( resp ) ) {
+    fatal_error( 1, "Malformed response" );
+  }
 
   size_t payload_length = resp.length - (sizeof resp);
   char *buf = malloc( payload_length + 1 );
-  if( buf == NULL ) fatal_error( 2, "malloc", strerror(errno) );
+  if( buf == NULL ) {
+    fatal_error( 2, "malloc", strerror(errno) );
+  }
 
-  size_t recvd_bytes = 0;
-  char *buf_head = buf + 1;
-  while( recvd_bytes < payload_length ) {
-    int size = recv( sock_fd, buf_head, payload_length - recvd_bytes, 0 );
-    if( size == -1 ) fatal_error( 2, "recv", strerror(errno) );
-    recvd_bytes += size;
-    buf_head += size;
+  if( recv_all( sock_fd, buf + 1, payload_length ) == -1 ) {
+    fatal_error( 2, "recv", strerror(errno) );
   }
 
   buf[0] = '\0';
@@ -43,7 +47,37 @@ void myftp_client_list( int sock_fd )
 
 void myftp_client_get( int sock_fd, char *filename )
 {
+  int filename_len = strlen( filename ) + 1;
+  struct myftp_msg req = new_myftp_msg( MYFTP_GET_REQUEST );
+  req.length += filename_len;
+  if( send_myftp_msg( sock_fd, &req ) == -1 ) {
+    fatal_error( 2, "send", strerror(errno) );
+  }
+  if( send_all( sock_fd, filename, filename_len ) == -1 ) {
+    fatal_error( 2, "send", strerror(errno) );
+  }
 
+  struct myftp_msg resp;
+  if( recv_myftp_msg( sock_fd, &resp ) == -1 ) {
+    fatal_error( 2, "recv", strerror(errno) );
+  }
+  if( !myftp_msg_ok( resp ) ) {
+    fatal_error( 1, "Malformed response" );
+  }
+  if( resp.type == MYFTP_GET_REPLY_FAILURE ) {
+    fatal_error( 1, "File does not exist" );
+  }
+
+  int file_size = resp.length - (sizeof resp);
+  int file_fd = open( filename, O_WRONLY | O_TRUNC );
+
+#if defined(__APPLE__)
+    sendfile( sock_fd, file_fd, 0, (off_t*) &file_size, NULL, 0 );
+#else
+    sendfile( file_fd, sock_fd, 0, file_size );
+#endif
+
+  close( file_fd );
 }
 
 void myftp_client_put( int sock_fd, char *filename )
