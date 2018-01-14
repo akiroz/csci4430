@@ -12,20 +12,13 @@
 #include <pthread.h>
 #include "myftp.h"
 
-#if defined(__linux__) || defined(__sun)
-  #include <sys/sendfile.h>
-#endif
+#define DATA_DIR "data"
 
 struct request {
   int sock_fd;
-  struct sockaddr addr;
+  struct sockaddr_storage addr;
   socklen_t addrlen;
 };
-
-
-// absolute data repo path initialized at startup
-char *abs_data_path;
-
 
 void myftp_server_list( int sock_fd )
 {
@@ -36,10 +29,10 @@ void myftp_server_list( int sock_fd )
   };
   struct str_list *filelist = NULL;
   struct str_list *filename = NULL;
-  DIR *data_dir = opendir("data");
+  DIR *data_dir = opendir( DATA_DIR );
   struct dirent *dir;
   while( (dir = readdir(data_dir)) ) {
-    if( dir->d_type == DT_REG && dir->d_name[0] != '.' ) {
+    if( dir->d_type == DT_REG ) {
       if( filelist == NULL ) {
         filename = malloc( sizeof (struct str_list) );
         filelist = filename;
@@ -60,14 +53,14 @@ void myftp_server_list( int sock_fd )
     msg.length += filename->length;
   }
   if( send_myftp_msg( sock_fd, &msg ) == -1 ){
-    fprintf( stderr, "send: %s\n", strerror(errno) );
+    fprintf( stderr, "Error: send: %s\n", strerror(errno) );
     return;
   }
 
   struct str_list *next_filename;
   for( filename = filelist; filename; filename = next_filename ) {
-    if( send_all( sock_fd, filename->data, filename->length ) == -1 ) {
-      fprintf( stderr, "send: %s\n", strerror(errno) );
+    if( write_all( sock_fd, filename->data, filename->length ) == -1 ) {
+      fprintf( stderr, "Error: send: %s\n", strerror(errno) );
       return;
     }
     next_filename = filename->next;
@@ -76,112 +69,128 @@ void myftp_server_list( int sock_fd )
   }
 }
 
-bool startsWith(const char *pre, const char *str)
-{
-  size_t lenpre = strlen(pre),
-         lenstr = strlen(str);
-  return lenstr < lenpre ? false : strncmp(pre, str, lenpre) == 0;
-}
-
-int open_file( char *filename, int *file_size )
-{
-  char *file_path = (char*) malloc( strlen("data/") + strlen(filename) + 2 );
-  strcpy( file_path, "data/" );
-  strcat( file_path, filename );
-
-  char *abs_path = realpath( file_path, NULL );
-  if( abs_path == NULL ) {
-    switch(errno) {
-      case ELOOP:
-      case ENAMETOOLONG:
-      case ENOENT:
-      case ENOTDIR:
-        fprintf( stderr, "Client Error: %s\n", strerror(errno) );
-        return -1;
-      default:
-        fprintf( stderr, "realpath: %s\n", strerror(errno) );
-        return -2;
-    }
-  }
-
-  bool path_valid = startsWith( abs_data_path, abs_path );
-  free( abs_path );
-  if( !path_valid ) {
-    fprintf( stderr, "Client Error: Invalid file path: %s\n", file_path );
-    return -1;
-  }
-
-  struct stat file_stat;
-  if( stat( file_path, &file_stat ) == -1 ) {
-    if( errno == ENOENT ) {
-      fprintf( stderr, "Client Error: File does not exist\n" );
-      return -1;
-    } else {
-      fprintf( stderr, "stat: %s\n", strerror(errno) );
-      return -2;
-    }
-  }
-  if( file_stat.st_mode != S_IFREG ) {
-    fprintf( stderr, "Client Error: Not a regular file\n" );
-    return -1;
-  }
-
-  *file_size = file_stat.st_size;
-
-  int file_fd = open( file_path, O_RDONLY );
-  if( file_fd == -1 ) {
-    fprintf( stderr, "open: %s\n", strerror(errno) );
-    return -2;
-  }  
-
-  return file_fd;
-}
-
 void myftp_server_get( int sock_fd, unsigned int msg_len )
 {
   if( msg_len < 1 ) {
     fprintf( stderr, "Client Error: Invalid payload length\n" );
-    return;
+    goto error;
   }
 
-  char *file_path = (char*) malloc( msg_len );
-  if( recv_all( sock_fd, file_path, msg_len ) ) {
-    fprintf( stderr, "recv: %s\n", strerror(errno) );
-    return;
+  char *filename = (char*) malloc( msg_len );
+  if( filename == NULL ) {
+    fprintf( stderr, "Error: malloc: %s\n", strerror(errno) );
+    goto error;
   }
-  if( file_path[msg_len - 1] != '\0' ) {
-    fprintf( stderr, "Client Error: Invalid file path\n" );
-    return;
+  if( read_all( sock_fd, filename, msg_len ) == -1 ) {
+    fprintf( stderr, "Error: recv: %s\n", strerror(errno) );
+    goto error;
   }
-  
-  fprintf( stderr, "GET: %s\n", file_path );
+  if( filename[msg_len - 1] != '\0' ) {
+    fprintf( stderr, "Error: Invalid payload\n" );
+    goto error;
+  }
+  if( !filename_valid( filename ) ) {
+    fprintf( stderr, "Client Error: Invalid filename\n" );
+    goto failure;
+  }
 
-  int file_size;
-  int file_fd = open_file( file_path, &file_size );
+  char *file_path = (char*) malloc( strlen(DATA_DIR"/") + strlen(filename) + 2 );
+  if( file_path == NULL ) {
+    fprintf( stderr, "Error: malloc: %s\n", strerror(errno) );
+    goto error;
+  }
+  strcpy( file_path, DATA_DIR"/" );
+  strcat( file_path, filename );
+
+  struct stat file_stat;
+  if( stat( file_path, &file_stat ) == -1 ) {
+    switch( errno ) {
+      case EACCES:
+      case ENAMETOOLONG:
+      case ENOENT:
+        fprintf( stderr, "Client Error: %s\n", strerror(errno) );
+        goto failure;
+      default:
+        fprintf( stderr, "Error: stat: %s\n", strerror(errno) );
+        goto error;
+    }
+  }
+  if( (file_stat.st_mode & S_IFMT) != S_IFREG ) {
+    fprintf( stderr, "Client Error: Not a regular file\n" );
+    goto failure;
+  }
+
+  struct myftp_msg resp = new_myftp_msg( MYFTP_GET_REPLY_SUCCESS );
+  resp.length += file_stat.st_size;
+  if( send_myftp_msg( sock_fd, &resp ) == -1 ) {
+    fprintf( stderr, "Error: send: %s\n", strerror(errno) );
+    goto error;
+  }
+
+  if( send_myftp_file( sock_fd, file_path, file_stat.st_size ) == -1 ) {
+    fprintf( stderr, "Error: send: %s\n", strerror(errno) );
+    goto error;
+  }
+
+error:
+  free( filename );
   free( file_path );
-  if( file_fd == -2 ) return;
-  if( file_fd == -1 ) {
-    struct myftp_msg resp = new_myftp_msg( MYFTP_GET_REPLY_FAILURE );
-    send_myftp_msg( sock_fd, &resp );
-  } else {
-    struct myftp_msg resp = new_myftp_msg( MYFTP_GET_REPLY_SUCCESS );
-    resp.length += file_size;
-    send_myftp_msg( sock_fd, &resp );
-
-#if defined(__APPLE__)
-    sendfile( file_fd, sock_fd, 0, (off_t*) &file_size, NULL, 0 );
-#else
-    sendfile( sock_fd, file_fd, 0, file_size );
-#endif
-
-    close( file_fd );
-  }
   return;
+
+failure:;
+  struct myftp_msg fail_resp = new_myftp_msg( MYFTP_GET_REPLY_FAILURE );
+  if( send_myftp_msg( sock_fd, &fail_resp ) == -1 ) {
+    fprintf( stderr, "Error: send: %s\n", strerror(errno) );
+  }
+  goto error;
 }
 
 void myftp_server_put( int sock_fd, unsigned int msg_len )
 {
+  if( msg_len < 1 ) {
+    fprintf( stderr, "Client Error: Invalid payload length\n" );
+    goto error;
+  }
 
+  char *filename = (char*) malloc( msg_len );
+  if( filename == NULL ) {
+    fprintf( stderr, "Error: malloc: %s\n", strerror(errno) );
+    goto error;
+  }
+  if( read_all( sock_fd, filename, msg_len ) == -1 ) {
+    fprintf( stderr, "Error: recv: %s\n", strerror(errno) );
+    goto error;
+  }
+  if( filename[msg_len - 1] != '\0' ) {
+    fprintf( stderr, "Error: Invalid payload\n" );
+    goto error;
+  }
+  if( !filename_valid( filename ) ) {
+    fprintf( stderr, "Client Error: Invalid filename\n" );
+    goto error;
+  }
+
+  char *file_path = (char*) malloc( strlen(DATA_DIR"/") + strlen(filename) + 2 );
+  if( file_path == NULL ) {
+    fprintf( stderr, "Error: malloc: %s\n", strerror(errno) );
+    goto error;
+  }
+  strcpy( file_path, DATA_DIR"/" );
+  strcat( file_path, filename );
+
+  struct myftp_msg resp = new_myftp_msg( MYFTP_PUT_REPLY );
+  if( send_myftp_msg( sock_fd, &resp ) == -1 ) {
+    fprintf( stderr, "Error: send: %s\n", strerror(errno) );
+  }
+
+  if( recv_myftp_file( sock_fd, file_path ) == -1 ){
+    fprintf( stderr, "Error: recv: %s\n", strerror(errno) );
+  }
+
+error:
+  free( filename );
+  free( file_path );
+  return;
 }
 
 void *handle_request( void *arg )
@@ -190,22 +199,22 @@ void *handle_request( void *arg )
 
   char hostname[256] = {0};
   int err = getnameinfo(
-      &(req->addr), req->addrlen,
-      hostname, 256, NULL, 0, 0);
+      (struct sockaddr*) &(req->addr), req->addrlen,
+      hostname, 256, NULL, 0, NI_NUMERICHOST );
   if( err != 0 ) {
-    fprintf( stderr, "getnameinfo: %s\n", gai_strerror(err) );
+    fprintf( stderr, "Error: getnameinfo: %s\n", gai_strerror(err) );
     goto fail;
   }
 
   struct myftp_msg msg;
   if( recv_myftp_msg( req->sock_fd, &msg ) == -1 ){
-    fprintf( stderr, "recv: %s\n", strerror(errno) );
+    fprintf( stderr, "Error: recv: %s\n", strerror(errno) );
     goto fail;
   }
 
   fprintf(
-      stderr, "Request: 0x%X %s (%lu bytes)\n",
-      msg.type, hostname, msg.length - (sizeof msg));
+      stderr, "Msg: 0x%X %s (%lu + %lu bytes)\n",
+      msg.type, hostname, sizeof msg, msg.length - (sizeof msg));
 
   if( !myftp_msg_ok( msg ) ) {
     fprintf( stderr, "Client Error: Malformed message\n" );
@@ -237,24 +246,23 @@ int main( int argc, char *argv[] )
 {
   if( argc < 2 ) fatal_error( 1, "Too few arguments" );
 
-  abs_data_path = realpath( "data", NULL );
-  DIR *data_dir = opendir( "data" );
+  DIR *data_dir = opendir( DATA_DIR );
   if( data_dir == NULL ) {
     fatal_error( 1, "Cannot open data directory" );
   }
   closedir(data_dir);
-  fprintf( stderr, "Using data dir: %s\n", abs_data_path );
+  fprintf( stderr, "Using data dir: %s\n", DATA_DIR );
 
-  int sock_fd = open_socket( "0.0.0.0", argv[1], AI_PASSIVE, MYFTP_BIND );
+  int sock_fd = open_socket( NULL, argv[1], AI_PASSIVE, MYFTP_BIND );
   int err = listen( sock_fd, 128 );
   if( err != 0 ) fatal_error( 2, "listen", strerror(errno) );
 
   fprintf( stderr, "Listening on port %s...\n", argv[1] );
   while(1) {
     struct request *req = malloc( sizeof (struct request) );
-    req->addr.sa_family = AF_INET;
+    req->addrlen = sizeof req->addr;
 
-    req->sock_fd = accept( sock_fd, &(req->addr), &(req->addrlen) );
+    req->sock_fd = accept( sock_fd, (struct sockaddr*) &(req->addr), &(req->addrlen) );
     if( req->sock_fd == -1 ) {
       switch( errno ) {
         case ECONNABORTED:
@@ -275,23 +283,23 @@ int main( int argc, char *argv[] )
       }
     }
 
-    handle_request(req);
-    //pthread_t handler_thread;
-    //pthread_attr_t attr;
-    //pthread_attr_init( &attr );
-    //pthread_attr_setdetachstate( &attr, PTHREAD_CREATE_DETACHED );
-    //err = pthread_create( &handler_thread, &attr, handle_request, req );
-    //if( err != 0 ) {
-    //  switch( errno ) {
-    //    case EAGAIN:
-    //      perror( "Error: pthread_create" );
-    //      free( req );
-    //      continue;
-    //    default:
-    //      fatal_error( 2, "pthread_create", strerror(errno) );
-    //  }
-    //}
-    //pthread_attr_destroy( &attr );
+    //handle_request(req);
+    pthread_t handler_thread;
+    pthread_attr_t attr;
+    pthread_attr_init( &attr );
+    pthread_attr_setdetachstate( &attr, PTHREAD_CREATE_DETACHED );
+    err = pthread_create( &handler_thread, &attr, handle_request, req );
+    if( err != 0 ) {
+      switch( errno ) {
+        case EAGAIN:
+          perror( "Error: pthread_create" );
+          free( req );
+          continue;
+        default:
+          fatal_error( 2, "pthread_create", strerror(errno) );
+      }
+    }
+    pthread_attr_destroy( &attr );
   }
 
   return 0;

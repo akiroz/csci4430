@@ -4,8 +4,8 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
-#include <fcntl.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include "myftp.h"
 
@@ -21,7 +21,7 @@ void myftp_client_list( int sock_fd )
   if( recv_myftp_msg( sock_fd, &resp ) == -1 ) {
     fatal_error( 2, "recv", strerror(errno) );
   }
-  if( !myftp_msg_ok( resp ) ) {
+  if( !( myftp_msg_ok( resp ) && resp.type == MYFTP_LIST_REPLY ) ) {
     fatal_error( 1, "Malformed response" );
   }
 
@@ -31,7 +31,7 @@ void myftp_client_list( int sock_fd )
     fatal_error( 2, "malloc", strerror(errno) );
   }
 
-  if( recv_all( sock_fd, buf + 1, payload_length ) == -1 ) {
+  if( read_all( sock_fd, buf + 1, payload_length ) == -1 ) {
     fatal_error( 2, "recv", strerror(errno) );
   }
 
@@ -53,7 +53,7 @@ void myftp_client_get( int sock_fd, char *filename )
   if( send_myftp_msg( sock_fd, &req ) == -1 ) {
     fatal_error( 2, "send", strerror(errno) );
   }
-  if( send_all( sock_fd, filename, filename_len ) == -1 ) {
+  if( write_all( sock_fd, filename, filename_len ) == -1 ) {
     fatal_error( 2, "send", strerror(errno) );
   }
 
@@ -67,22 +67,54 @@ void myftp_client_get( int sock_fd, char *filename )
   if( resp.type == MYFTP_GET_REPLY_FAILURE ) {
     fatal_error( 1, "File does not exist" );
   }
+  if( resp.type != MYFTP_GET_REPLY_SUCCESS ) {
+    fatal_error( 1, "Malformed response" );
+  }
 
-  int file_size = resp.length - (sizeof resp);
-  int file_fd = open( filename, O_WRONLY | O_TRUNC );
+  if( recv_myftp_file( sock_fd, filename ) == -1 ){
+    fatal_error( 0 );
+  }
 
-#if defined(__APPLE__)
-    sendfile( sock_fd, file_fd, 0, (off_t*) &file_size, NULL, 0 );
-#else
-    sendfile( file_fd, sock_fd, 0, file_size );
-#endif
-
-  close( file_fd );
 }
 
 void myftp_client_put( int sock_fd, char *filename )
 {
+  struct stat file_stat;
+  if( stat( filename, &file_stat ) == -1 ) {
+    switch( errno ) {
+      case EACCES:
+      case ENAMETOOLONG:
+      case ENOENT:
+        fatal_error( 1, strerror(errno) );
+      default:
+        fatal_error( 2, "stat", strerror(errno) );
+    }
+  }
+  if( (file_stat.st_mode & S_IFMT) != S_IFREG ) {
+    fatal_error( 1, "Not a regular file" );
+  }
 
+  int filename_len = strlen( filename ) + 1;
+  struct myftp_msg req = new_myftp_msg( MYFTP_PUT_REQUEST );
+  req.length += filename_len;
+  if( send_myftp_msg( sock_fd, &req ) == -1 ) {
+    fatal_error( 2, "send", strerror(errno) );
+  }
+  if( write_all( sock_fd, filename, filename_len ) == -1 ) {
+    fatal_error( 2, "send", strerror(errno) );
+  }
+
+  struct myftp_msg resp;
+  if( recv_myftp_msg( sock_fd, &resp ) == -1 ) {
+    fatal_error( 2, "recv", strerror(errno) );
+  }
+  if( !( myftp_msg_ok( resp ) && resp.type == MYFTP_PUT_REPLY ) ) {
+    fatal_error( 1, "Malformed response" );
+  }
+
+  if( send_myftp_file( sock_fd, filename, file_stat.st_size ) == -1 ) {
+    fatal_error( 0 );
+  }
 }
 
 int main( int argc, char *argv[] )
@@ -95,11 +127,13 @@ int main( int argc, char *argv[] )
     myftp_client_list( sock_fd );
 
   } else if( strcmp( argv[3], "get" ) == 0 ) {
-    if( argc < 5 ) fatal_error( 1, "Missing file argument" );
+    if( argc < 5 ) fatal_error( 1, "Missing filename" );
+    if( !filename_valid( argv[4] ) ) fatal_error( 1, "Invalid filename" );
     myftp_client_get( sock_fd, argv[4] );
 
   } else if( strcmp( argv[3], "put" ) == 0 ) {
-    if( argc < 5 ) fatal_error( 1, "Missing file argument" );
+    if( argc < 5 ) fatal_error( 1, "Missing filename" );
+    if( !filename_valid( argv[4] ) ) fatal_error( 1, "Invalid filename" );
     myftp_client_put( sock_fd, argv[4] );
 
   } else {

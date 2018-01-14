@@ -22,6 +22,8 @@ void fatal_error( int argc, ... );
 
 int open_socket( char *hostname, char *port, int flags, int action );
 
+bool filename_valid( char *filename );
+
 bool myftp_msg_ok(struct myftp_msg msg);
 
 struct myftp_msg new_myftp_msg( unsigned char type );
@@ -30,7 +32,13 @@ int recv_myftp_msg( int sock_fd, struct myftp_msg *msg );
 
 int send_myftp_msg( int sock_fd, struct myftp_msg *msg );
 
-int recv_all( int sock_fd, char *buf, size_t length );
+int recv_myftp_file( int sock_fd, char *filename );
 
-int send_all( int sock_fd, char *buf, size_t length );
+int send_myftp_file( int sock_fd, char *filename, size_t file_size );
+
+int read_all( int fd, char *buf, size_t length );
+
+int write_all( int fd, char *buf, size_t length );
+
+int copy_file( int src, int dst, size_t length, char *buf, size_t buf_size );
 
