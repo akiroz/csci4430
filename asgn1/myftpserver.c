@@ -32,7 +32,12 @@ void myftp_server_list( int sock_fd )
   DIR *data_dir = opendir( DATA_DIR );
   struct dirent *dir;
   while( (dir = readdir(data_dir)) ) {
-    if( dir->d_type == DT_REG ) {
+    struct stat s;
+    if( stat( dir->d_name, &s ) == -1 ) {
+      fprintf( stderr, "Error: stat %s: %s\n", dir->d_name, strerror(errno) );
+      continue;
+    }
+    if( (s.st_mode & S_IFMT) == S_IFREG ) {
       if( filelist == NULL ) {
         filename = malloc( sizeof (struct str_list) );
         filelist = filename;

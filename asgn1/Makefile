@@ -10,4 +10,4 @@ myftpclient: myftp.h myftp.c myftpclient.c
 	gcc -o myftpclient-$(arch)-$(kernel) -std=gnu99 myftp.c myftpclient.c
 
 clean:
-	rm -rf *.o *.dSYM myftpserver* myftpclient*
+	rm -rf *.o *.dSYM myftpserver-$(arch)-$(kernel) myftpclient-$(arch)-$(kernel)
