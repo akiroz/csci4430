@@ -3,7 +3,7 @@
 *.o
 *.dSYM
 .gdb_history
-myftpserver
-myftpclient
+myftpserver*
+myftpclient*
 data
 test
