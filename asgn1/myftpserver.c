@@ -136,12 +136,12 @@ void myftp_server_get( int sock_fd, unsigned int msg_len )
   strcat( file_path, filename );
 
   struct stat file_stat;
+#if defined(__sun)
+  errno = ENOENT;
+#endif
   if( stat( file_path, &file_stat ) == -1 ) {
     switch( errno ) {
       case EACCES:
-#if defined(__sun)
-      case EAGAIN:
-#endif
       case ENAMETOOLONG:
       case ENOENT:
         fprintf( stderr, "Client Error: %s\n", strerror(errno) );

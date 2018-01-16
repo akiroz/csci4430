@@ -19,7 +19,9 @@ $(client): myftp.c myftpclient.c
 	gcc $(cflags) -o $@ $^
 
 myftp.c: myftp.h
+
 myftpserver.c: myftp.h
+
 myftpclient.c: myftp.h
 
 clean:
