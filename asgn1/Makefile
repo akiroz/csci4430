@@ -1,19 +1,27 @@
 arch := $(shell uname -m)
 kernel := $(shell uname -s)
 
-cflags = -std=gnu99 
+server := myftpserver-$(arch)-$(kernel)
+client := myftpclient-$(arch)-$(kernel)
+
+cflags = -std=gnu99 -lpthread
 
 ifeq ($(kernel),SunOS)
-	cflags += -lsocket -lnsl
+	cflags += -lsocket -lnsl -m64
 endif
 
-all: myftpserver myftpclient
+all: $(server) $(client)
 
-myftpserver: myftp.h myftp.c myftpserver.c
-	gcc $(cflags) -lpthread -o myftpserver-$(arch)-$(kernel) myftp.c myftpserver.c
+$(server): myftp.c myftpserver.c
+	gcc $(cflags) -o $@ $^
 
-myftpclient: myftp.h myftp.c myftpclient.c
-	gcc $(cflags) -o myftpclient-$(arch)-$(kernel) myftp.c myftpclient.c
+$(client): myftp.c myftpclient.c
+	gcc $(cflags) -o $@ $^
+
+myftp.c: myftp.h
+myftpserver.c: myftp.h
+myftpclient.c: myftp.h
 
 clean:
-	rm -rf *.o *.dSYM myftpserver-$(arch)-$(kernel) myftpclient-$(arch)-$(kernel)
+	rm -rf *.o *.dSYM $(server) $(client)
+

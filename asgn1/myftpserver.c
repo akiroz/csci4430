@@ -30,14 +30,42 @@ void myftp_server_list( int sock_fd )
   struct str_list *filelist = NULL;
   struct str_list *filename = NULL;
   DIR *data_dir = opendir( DATA_DIR );
-  struct dirent *dir;
-  while( (dir = readdir(data_dir)) ) {
-    struct stat s;
-    if( stat( dir->d_name, &s ) == -1 ) {
-      fprintf( stderr, "Error: stat %s: %s\n", dir->d_name, strerror(errno) );
+  if( data_dir == NULL ) {
+    fprintf( stderr, "Error: opendir: %s\n", strerror(errno) );
+    return;
+  }
+
+  while(1) {
+    errno = 0;
+    struct dirent *dir = readdir( data_dir );
+    if( dir == NULL ) {
+      if( errno != 0 ) {
+        fprintf( stderr, "Error: readdir: %s\n", strerror(errno) );
+      }
+      break;
+    }
+
+#if defined(__sun)
+    char *file_path = (char*) malloc( strlen(DATA_DIR"/") + strlen(dir->d_name) + 2 );
+    if( file_path == NULL ) {
+      fprintf( stderr, "Error: malloc: %s\n", strerror(errno) );
       continue;
     }
+    strcpy( file_path, DATA_DIR"/" );
+    strcat( file_path, dir->d_name );
+
+    struct stat s;
+    if( stat( file_path, &s ) == -1 ) {
+      fprintf( stderr, "Error: stat %s: %s\n", dir->d_name, strerror(errno) );
+      free( file_path );
+      continue;
+    }
+    free( file_path );
+
     if( (s.st_mode & S_IFMT) == S_IFREG ) {
+#else
+    if( dir->d_type == DT_REG ) {
+#endif
       if( filelist == NULL ) {
         filename = malloc( sizeof (struct str_list) );
         filelist = filename;
@@ -111,6 +139,9 @@ void myftp_server_get( int sock_fd, unsigned int msg_len )
   if( stat( file_path, &file_stat ) == -1 ) {
     switch( errno ) {
       case EACCES:
+#if defined(__sun)
+      case EAGAIN:
+#endif
       case ENAMETOOLONG:
       case ENOENT:
         fprintf( stderr, "Client Error: %s\n", strerror(errno) );
