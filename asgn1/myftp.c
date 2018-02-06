@@ -51,7 +51,14 @@ int open_socket( char *hostname, char *port, int flags, int action )
       host->ai_socktype,
       host->ai_protocol);
   if( sock_fd == -1 ) fatal_error( 2, "socket", strerror(errno) );
-
+  
+  //ADDED FOR REUSABLE PORT
+  int val = 1;
+  if (setsockopt(sock_fd, SOL_SOCKET, SO_REUSEADDR, &val, sizeof(int)) == -1) {
+	perror("setsockopt failed");
+	exit(1);
+  }
+  
   switch(action) {
     case MYFTP_BIND:
       err = bind( sock_fd, host->ai_addr, host->ai_addrlen );

@@ -1,8 +1,8 @@
 arch := $(shell uname -m)
 kernel := $(shell uname -s)
 
-server := myftpserver-$(arch)-$(kernel)
-client := myftpclient-$(arch)-$(kernel)
+server := myftpserver
+client := myftpclient
 
 cflags = -std=gnu99 -lpthread
 
