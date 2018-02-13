@@ -1,0 +1,10 @@
+CC = gcc
+LIB = -lpthread -lsocket -lnsl
+
+all: mttcpserver tcpclient 
+
+mttcpserver: mttcpserver.c
+	${CC} -Wall -o mttcpserver mttcpserver.c ${LIB}
+
+tcpclient: tcpclient.c
+	${CC} -Wall -o tcpclient tcpclient.c ${LIB}
