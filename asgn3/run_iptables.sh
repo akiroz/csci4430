@@ -1,5 +1,5 @@
 #!/bin/bash
-VMID=""                                 # VM group no
+VMID="53"                               # VM group no
 IP="10.3.1.${VMID}"                     # public interface
 LAN="10.0.${VMID}.0"                    # private LAN network address (without subnet mask)
 MASK="24"
