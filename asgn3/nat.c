@@ -70,37 +70,20 @@ void get_vma_addr() {
 */
 
 // function for generate & consume tokens
-int token_process(){
+int consume_token() {
 	
 	pthread_mutex_lock(&bucket_mutex);  //locking whole function so there won't be wrong time record or wrong no. of tokens left 
 	
-	// generate tokens
-	time(&end_t);
-	diff_t = difftime(end_t, start_t);  // calculating time difference ./. last token fill & now in terms of secs
-	
-	if (diff_t >= 1.0){
-		int num_of_new_tokens = (int) diff_t * fillRate;  // amount of tokens that should be put into the bucket
-		printf("Generating tokens\n");
-		tokenBucket += num_of_new_tokens;
-		time(&start_t);  // restart time counting
-	}
-	
-	// if the token is full, discard excessive tokens
-	if (tokenBucket > bucketSize){
-		printf("Bucket full\n");
-		tokenBucket = bucketSize;
-	}
-	
 	// if there is no tokens, return -1
 	if (tokenBucket == 0){
+		pthread_mutex_unlock(&bucket_mutex);
 		return -1;
+	} else {
+		printf("Consumed token\n");
+		tokenBucket--;  // consume a token if ready to transmit packet
+		pthread_mutex_unlock(&bucket_mutex);
+		return 0;
 	}
-	
-	printf("Consumed token\n");
-	tokenBucket--;  // consume a token if ready to transmit packet
-	
-	pthread_mutex_unlock(&bucket_mutex);
-	return 0;
 }
 
 // pthread function
@@ -251,7 +234,7 @@ void *packet_processing(void *args){
 	tim1.tv_nsec = 5000;
 	
 	// until there is one token in the bucket, packet transmission is blocked
-	while (token_process() == -1) {
+	while (consume_token() == -1) {
 		if (nanosleep(&tim1, &tim2) < 0){
 			printf("error when waiting available token\n");
 			exit(1);
@@ -319,9 +302,7 @@ int callback(struct nfq_q_handle *qh, struct nfgenmsg *nfmsg, struct nfq_data *n
 	
 	// create thread and join thread
 	int ret_val = pthread_create(&thread[i], NULL, packet_processing, (void*)&tgs);
-	for (i = 0; i < MAXPKTS; i++){
-		pthread_join(thread[i], &tret);
-	}
+	pthread_join(thread[i], &tret);
 }
 
 int main(int argc, char *argv[]) {
@@ -401,9 +382,26 @@ int main(int argc, char *argv[]) {
 
 	printf("Starts to receive packets\n");
 	
+	time(&start_t);
 	while ((rv = recv(fd, buf, sizeof(buf), 0)) >= 0) {
+		time(&end_t);
+		diff_t = difftime(end_t, start_t);
+		
+
+		int num_of_new_tokens = (int) diff_t * fillRate;  // amount of tokens that should be put into the bucket
+		printf("Generating tokens\n");
+		tokenBucket += num_of_new_tokens;
+
+		// if the token is full, discard excessive tokens
+		if (tokenBucket > bucketSize){
+			printf("Bucket full\n");
+			tokenBucket = bucketSize;
+		}
+		
 		printf("Received packet\n");
 		nfq_handle_packet(h, buf, rv);
+
+		time(&start_t);
 	}
 
 	printf("Closing program\n");
