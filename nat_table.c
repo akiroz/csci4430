@@ -31,7 +31,7 @@ void print_table() {
     int i;
 	
 	// table header
-    printf("src.addr         src.port  translated.addr  translated.port\n");
+    printf(" src.addr    src.port  translated.addr  translated.port\n");
 	
     for(i = 0; i < MAX_PAIRS; i++) {
         if(nat_table[i].original_src_ip != -1) {  // if the row has a mapping
@@ -45,7 +45,7 @@ void print_table() {
             strcpy(tran_addr_str, (char*)inet_ntoa(tran_addr));
 			
 			// print table
-            printf("%s %d %s %d\n",
+            printf("%s     %d     %s       %d\n",
                     ori_addr_str,
                     nat_table[i].original_src_port,
                     tran_addr_str,
